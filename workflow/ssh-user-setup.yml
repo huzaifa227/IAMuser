@@ -1,11 +1,61 @@
-name: Test Workflow
+name: Create EC2 User and SSH Key
 
 on:
   workflow_dispatch:
+    inputs:
+      username:
+        description: "Linux username to create on EC2"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
-  test:
+  create-ssh-user:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Echo Test
-        run: echo "Workflow is working"
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure AWS Credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        role-to-assume: arn:aws:iam::<account-id>:role/github-ec2-ssm-role
+        aws-region: us-east-1
+
+    - name: Generate SSH key pair
+      run: |
+        ssh-keygen -t rsa -b 2048 -f mykey -N ""
+        echo "PRIVATE_KEY<<EOF" >> $GITHUB_ENV
+        cat mykey >> $GITHUB_ENV
+        echo "EOF" >> $GITHUB_ENV
+        echo "PUBLIC_KEY<<EOF" >> $GITHUB_ENV
+        cat mykey.pub >> $GITHUB_ENV
+        echo "EOF" >> $GITHUB_ENV
+
+    - name: Store keys in GitHub Secrets (Optional)
+      run: |
+        echo "Public and private key saved temporarily. You can manually add them to GitHub or AWS Secrets Manager."
+
+    - name: Send SSM command to EC2 to create user
+      run: |
+        INSTANCE_ID=$(aws ec2 describe-instances \
+          --filters "Name=tag:Name,Values=my-ec2-tag" "Name=instance-state-name,Values=running" \
+          --query "Reservations[0].Instances[0].InstanceId" --output text)
+
+        aws ssm send-command \
+          --instance-ids "$INSTANCE_ID" \
+          --document-name "AWS-RunShellScript" \
+          --comment "Create user and set SSH key" \
+          --parameters commands='
+            sudo useradd -m ${{ github.event.inputs.username }};
+            sudo mkdir -p /home/${{ github.event.inputs.username }}/.ssh;
+            echo "${{ env.PUBLIC_KEY }}" | sudo tee /home/${{ github.event.inputs.username }}/.ssh/authorized_keys;
+            sudo chown -R ${{ github.event.inputs.username }}:${{ github.event.inputs.username }} /home/${{ github.event.inputs.username }}/.ssh;
+            sudo chmod 700 /home/${{ github.event.inputs.username }}/.ssh;
+            sudo chmod 600 /home/${{ github.event.inputs.username }}/.ssh/authorized_keys;
+          ' \
+          --region us-east-1 \
+          --output text

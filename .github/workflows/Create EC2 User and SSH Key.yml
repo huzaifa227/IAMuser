@@ -54,7 +54,7 @@ jobs:
           --query "Reservations[0].Instances[0].InstanceId" --output text)
         echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
 
-    - name: Send command via SSM to create user and configure SSH
+        - name: Send command via SSM to create user and configure SSH
       run: |
         USERNAME=${{ github.event.inputs.username }}
         PUBLIC_KEY=$(cat mykey.pub)
@@ -63,12 +63,14 @@ jobs:
           --instance-ids "$INSTANCE_ID" \
           --document-name "AWS-RunShellScript" \
           --comment "Create user and add SSH key" \
-          --parameters commands="sudo useradd -m $USERNAME || true",\
-"sudo mkdir -p /home/$USERNAME/.ssh",\
-"echo \"$PUBLIC_KEY\" | sudo tee /home/$USERNAME/.ssh/authorized_keys",\
-"sudo chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh",\
-"sudo chmod 700 /home/$USERNAME/.ssh",\
-"sudo chmod 600 /home/$USERNAME/.ssh/authorized_keys" \
+          --parameters 'commands=[
+            "sudo useradd -m '"$USERNAME"' || true",
+            "sudo mkdir -p /home/'"$USERNAME"'/.ssh",
+            "echo '"$PUBLIC_KEY"' | sudo tee /home/'"$USERNAME"'/.ssh/authorized_keys",
+            "sudo chown -R '"$USERNAME"':'"$USERNAME"' /home/'"$USERNAME"'/.ssh",
+            "sudo chmod 700 /home/'"$USERNAME"'/.ssh",
+            "sudo chmod 600 /home/'"$USERNAME"'/.ssh/authorized_keys"
+          ]' \
           --region us-east-1 \
           --output text
 

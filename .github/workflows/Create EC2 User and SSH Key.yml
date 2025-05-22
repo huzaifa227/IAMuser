@@ -28,9 +28,12 @@ jobs:
     - name: Generate SSH key pair
       id: ssh-keygen
       run: |
-        ssh-keygen -t rsa -b 2048 -f mykey -N ""
-        echo "PRIVATE_KEY=$(base64 -w 0 mykey)" >> $GITHUB_ENV
-        echo "PUBLIC_KEY=$(base64 -w 0 mykey.pub)" >> $GITHUB_ENV
+        USERNAME=${{ github.event.inputs.username }}
+        ssh-keygen -t rsa -b 2048 -f "$USERNAME" -N ""
+        echo "PRIVATE_KEY=$(base64 -w 0 $USERNAME)" >> $GITHUB_ENV
+        echo "PUBLIC_KEY=$(base64 -w 0 $USERNAME.pub)" >> $GITHUB_ENV
+        echo "KEY_FILE=$USERNAME" >> $GITHUB_ENV
+
 
     - name: Store keys in AWS Secrets Manager
       run: |

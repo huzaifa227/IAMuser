@@ -51,16 +51,28 @@ jobs:
           --query "Reservations[0].Instances[0].InstanceId" --output text)
         echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
 
-    - name: Create user and setup SSH access via SSM
-      run: |
+        - name: Create user and setup SSH access via SSM
+          run: |
         USERNAME="${{ env.USERNAME }}"
         PUBLIC_KEY_CONTENT=$(echo "${{ env.PUBLIC_KEY }}" | base64 -d)
 
+        # Escape double quotes and line content correctly
         aws ssm send-command \
           --instance-ids "${{ env.INSTANCE_ID }}" \
           --document-name "AWS-RunShellScript" \
           --comment "Create user and add SSH key" \
-          --parameters commands=["set -e","sudo useradd -m -s /bin/bash $USERNAME || true","sudo passwd -l $USERNAME || true","sudo mkdir -p /home/$USERNAME/.ssh","echo '$PUBLIC_KEY_CONTENT' | sudo tee /home/$USERNAME/.ssh/authorized_keys","sudo chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh","sudo chmod 700 /home/$USERNAME/.ssh","sudo chmod 600 /home/$USERNAME/.ssh/authorized_keys","sudo touch /home/$USERNAME/.hushlogin","sudo chown $USERNAME:$USERNAME /home/$USERNAME/.hushlogin"] \
+          --parameters commands="[
+            \"set -e\",
+            \"sudo useradd -m -s /bin/bash $USERNAME || true\",
+            \"sudo passwd -l $USERNAME || true\",
+            \"sudo mkdir -p /home/$USERNAME/.ssh\",
+            \"echo $PUBLIC_KEY_CONTENT | sudo tee /home/$USERNAME/.ssh/authorized_keys\",
+            \"sudo chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh\",
+            \"sudo chmod 700 /home/$USERNAME/.ssh\",
+            \"sudo chmod 600 /home/$USERNAME/.ssh/authorized_keys\",
+            \"sudo touch /home/$USERNAME/.hushlogin\",
+            \"sudo chown $USERNAME:$USERNAME /home/$USERNAME/.hushlogin\"
+          ]" \
           --region us-east-1 \
           --output text
 

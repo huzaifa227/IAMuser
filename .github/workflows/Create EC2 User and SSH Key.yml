@@ -73,5 +73,6 @@ jobs:
     - name: Upload private key for download
       uses: actions/upload-artifact@v4
       with:
-        name: ec2-private-key
-        path: mykey
+        name: ec2-private-key-${{ github.event.inputs.username }}
+        path: ${{ env.KEY_FILE }}
+

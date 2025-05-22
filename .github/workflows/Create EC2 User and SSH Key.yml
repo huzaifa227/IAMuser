@@ -29,22 +29,18 @@ jobs:
       id: ssh-keygen
       run: |
         ssh-keygen -t rsa -b 2048 -f mykey -N ""
-        echo "PRIVATE_KEY<<EOF" >> $GITHUB_ENV
-        cat mykey >> $GITHUB_ENV
-        echo "EOF" >> $GITHUB_ENV
-        echo "PUBLIC_KEY<<EOF" >> $GITHUB_ENV
-        cat mykey.pub >> $GITHUB_ENV
-        echo "EOF" >> $GITHUB_ENV
+        echo "PRIVATE_KEY=$(base64 -w 0 mykey)" >> $GITHUB_ENV
+        echo "PUBLIC_KEY=$(base64 -w 0 mykey.pub)" >> $GITHUB_ENV
 
     - name: Store keys in AWS Secrets Manager
       run: |
         SECRET_NAME="test"
 
-        aws secretsmanager create-secret --name "$SECRET_NAME" --secret-string "{}" 2>/dev/null || echo "Secret already exists."
+        aws secretsmanager create-secret --name "$SECRET_NAME" --secret-string '{}' 2>/dev/null || echo "Secret already exists."
 
         aws secretsmanager put-secret-value \
           --secret-id "$SECRET_NAME" \
-          --secret-string "{\"private_key\": \"$(cat mykey | base64)\", \"public_key\": \"$(cat mykey.pub | base64)\"}"
+          --secret-string "{\"private_key\": \"${{ env.PRIVATE_KEY }}\", \"public_key\": \"${{ env.PUBLIC_KEY }}\"}"
 
     - name: Find EC2 Instance ID
       id: find-ec2
@@ -54,19 +50,19 @@ jobs:
           --query "Reservations[0].Instances[0].InstanceId" --output text)
         echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
 
-        - name: Send command via SSM to create user and configure SSH
+    - name: Send command via SSM to create user and configure SSH
       run: |
         USERNAME=${{ github.event.inputs.username }}
-        PUBLIC_KEY=$(cat mykey.pub)
+        PUBLIC_KEY_CONTENT=$(base64 -d <<< "${{ env.PUBLIC_KEY }}")
 
         aws ssm send-command \
-          --instance-ids "$INSTANCE_ID" \
+          --instance-ids "${{ env.INSTANCE_ID }}" \
           --document-name "AWS-RunShellScript" \
           --comment "Create user and add SSH key" \
           --parameters 'commands=[
             "sudo useradd -m '"$USERNAME"' || true",
             "sudo mkdir -p /home/'"$USERNAME"'/.ssh",
-            "echo '"$PUBLIC_KEY"' | sudo tee /home/'"$USERNAME"'/.ssh/authorized_keys",
+            "echo '"$PUBLIC_KEY_CONTENT"' | sudo tee /home/'"$USERNAME"'/.ssh/authorized_keys",
             "sudo chown -R '"$USERNAME"':'"$USERNAME"' /home/'"$USERNAME"'/.ssh",
             "sudo chmod 700 /home/'"$USERNAME"'/.ssh",
             "sudo chmod 600 /home/'"$USERNAME"'/.ssh/authorized_keys"

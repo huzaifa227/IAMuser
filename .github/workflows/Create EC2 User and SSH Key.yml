@@ -25,75 +25,47 @@ jobs:
         role-to-assume: arn:aws:iam::776705051324:role/github-action-role
         aws-region: us-east-1
 
-    ########################################################
-    # 1. Generate an SSH key whose filename == username
-    ########################################################
     - name: Generate SSH key pair
-      id: ssh-keygen
+      id: generate-key
       run: |
-        USERNAME='${{ github.event.inputs.username }}'
+        USERNAME="${{ github.event.inputs.username }}"
         ssh-keygen -t rsa -b 2048 -f "$USERNAME" -N ""
-        echo "PRIVATE_KEY=$(base64 -w0 "$USERNAME")"   >> "$GITHUB_ENV"
-        echo "PUBLIC_KEY=$(base64 -w0 "$USERNAME.pub")" >> "$GITHUB_ENV"
-        echo "KEY_FILE=$USERNAME"                       >> "$GITHUB_ENV"
+        echo "PRIVATE_KEY=$(base64 -w 0 $USERNAME)" >> $GITHUB_ENV
+        echo "PUBLIC_KEY=$(base64 -w 0 $USERNAME.pub)" >> $GITHUB_ENV
+        echo "KEY_FILE=$USERNAME" >> $GITHUB_ENV
+        echo "USERNAME=$USERNAME" >> $GITHUB_ENV
 
-    ########################################################
-    # 2. Store both keys in AWS Secrets Manager  (secret 'test')
-    ########################################################
     - name: Store keys in AWS Secrets Manager
       run: |
         SECRET_NAME="test"
-        aws secretsmanager create-secret --name "$SECRET_NAME" --secret-string '{}' 2>/dev/null || true
+        aws secretsmanager create-secret --name "$SECRET_NAME" --secret-string '{}' 2>/dev/null || echo "Secret already exists."
         aws secretsmanager put-secret-value \
           --secret-id "$SECRET_NAME" \
-          --secret-string "{\"private_key\":\"${{ env.PRIVATE_KEY }}\",\"public_key\":\"${{ env.PUBLIC_KEY }}\"}"
+          --secret-string "{\"private_key\": \"${{ env.PRIVATE_KEY }}\", \"public_key\": \"${{ env.PUBLIC_KEY }}\"}"
 
-    ########################################################
-    # 3. Locate the EC2 instance we want to configure
-    ########################################################
     - name: Find EC2 Instance ID
       id: find-ec2
       run: |
         INSTANCE_ID=$(aws ec2 describe-instances \
           --filters "Name=tag:Name,Values=my-ec2-tag" "Name=instance-state-name,Values=running" \
           --query "Reservations[0].Instances[0].InstanceId" --output text)
-        echo "INSTANCE_ID=$INSTANCE_ID" >> "$GITHUB_ENV"
+        echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
 
-    ########################################################
-    # 4. Create the user and configure key-only SSH via SSM
-    ########################################################
-    - name: Send SSM command – create user, lock password, add key
+    - name: Create user and setup SSH access via SSM
       run: |
-        USERNAME='${{ github.event.inputs.username }}'
-        PUBLIC_KEY_CONTENT=$(base64 -d <<< '${{ env.PUBLIC_KEY }}')
+        USERNAME="${{ env.USERNAME }}"
+        PUBLIC_KEY_CONTENT=$(echo "${{ env.PUBLIC_KEY }}" | base64 -d)
 
         aws ssm send-command \
           --instance-ids "${{ env.INSTANCE_ID }}" \
           --document-name "AWS-RunShellScript" \
-          --comment "Create $USERNAME and configure key-only SSH" \
-          --parameters 'commands=[
-            "set -e",
-            "sudo useradd -m -s /bin/bash '"$USERNAME"' || true",
-            # ---- lock any password so only key auth works ----
-            "sudo passwd -l '"$USERNAME"' || true",
-            # ---- SSH key setup ----
-            "sudo mkdir -p /home/'"$USERNAME"'/.ssh",
-            "echo '"$PUBLIC_KEY_CONTENT"' | sudo tee /home/'"$USERNAME"'/.ssh/authorized_keys",
-            "sudo chown -R '"$USERNAME"':'"$USERNAME"' /home/'"$USERNAME"'/.ssh",
-            "sudo chmod 700 /home/'"$USERNAME"'/.ssh",
-            "sudo chmod 600 /home/'"$USERNAME"'/.ssh/authorized_keys",
-            # ---- optional: silence Ubuntu MOTD ----
-            "sudo touch /home/'"$USERNAME"'/.hushlogin",
-            "sudo chown '"$USERNAME"':'"$USERNAME"' /home/'"$USERNAME"'/.hushlogin"
-          ]' \
+          --comment "Create user and add SSH key" \
+          --parameters commands=["set -e","sudo useradd -m -s /bin/bash $USERNAME || true","sudo passwd -l $USERNAME || true","sudo mkdir -p /home/$USERNAME/.ssh","echo '$PUBLIC_KEY_CONTENT' | sudo tee /home/$USERNAME/.ssh/authorized_keys","sudo chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh","sudo chmod 700 /home/$USERNAME/.ssh","sudo chmod 600 /home/$USERNAME/.ssh/authorized_keys","sudo touch /home/$USERNAME/.hushlogin","sudo chown $USERNAME:$USERNAME /home/$USERNAME/.hushlogin"] \
           --region us-east-1 \
           --output text
 
-    ########################################################
-    # 5. Make the private key downloadable from the run
-    ########################################################
     - name: Upload private key for download
       uses: actions/upload-artifact@v4
       with:
-        name: ec2-private-key-${{ github.event.inputs.username }}
+        name: ec2-private-key-${{ env.USERNAME }}
         path: ${{ env.KEY_FILE }}

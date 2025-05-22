@@ -14,7 +14,8 @@ permissions:
 jobs:
   create-user-on-ec2:
     runs-on: ubuntu-latest
-
+    env:
+      AWS_REGION: us-east-1
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
@@ -23,42 +24,48 @@ jobs:
       uses: aws-actions/configure-aws-credentials@v2
       with:
         role-to-assume: arn:aws:iam::776705051324:role/github-action-role
-        aws-region: us-east-1
+        aws-region: ${{ env.AWS_REGION }}
 
     - name: Generate SSH key pair
-      id: generate-key
+      id: ssh-keygen
       run: |
         USERNAME="${{ github.event.inputs.username }}"
         ssh-keygen -t rsa -b 2048 -f "$USERNAME" -N ""
+        echo "USERNAME=$USERNAME" >> $GITHUB_ENV
+        # Save keys as base64 strings to env for safe usage
         echo "PRIVATE_KEY=$(base64 -w 0 $USERNAME)" >> $GITHUB_ENV
         echo "PUBLIC_KEY=$(base64 -w 0 $USERNAME.pub)" >> $GITHUB_ENV
         echo "KEY_FILE=$USERNAME" >> $GITHUB_ENV
-        echo "USERNAME=$USERNAME" >> $GITHUB_ENV
 
     - name: Store keys in AWS Secrets Manager
       run: |
         SECRET_NAME="test"
+
+        # Create secret if it doesn't exist (ignore error if exists)
         aws secretsmanager create-secret --name "$SECRET_NAME" --secret-string '{}' 2>/dev/null || echo "Secret already exists."
+
+        # Put the latest keys into the secret
         aws secretsmanager put-secret-value \
           --secret-id "$SECRET_NAME" \
-          --secret-string "{\"private_key\": \"${{ env.PRIVATE_KEY }}\", \"public_key\": \"${{ env.PUBLIC_KEY }}\"}"
+          --secret-string "{\"private_key\": \"${PRIVATE_KEY}\", \"public_key\": \"${PUBLIC_KEY}\"}" \
+          --region $AWS_REGION
 
     - name: Find EC2 Instance ID
       id: find-ec2
       run: |
         INSTANCE_ID=$(aws ec2 describe-instances \
           --filters "Name=tag:Name,Values=my-ec2-tag" "Name=instance-state-name,Values=running" \
-          --query "Reservations[0].Instances[0].InstanceId" --output text)
+          --query "Reservations[0].Instances[0].InstanceId" --output text \
+          --region $AWS_REGION)
         echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
 
-        - name: Create user and setup SSH access via SSM
-          run: |
-        USERNAME="${{ env.USERNAME }}"
-        PUBLIC_KEY_CONTENT=$(echo "${{ env.PUBLIC_KEY }}" | base64 -d)
+    - name: Create user and setup SSH access via SSM
+      run: |
+        USERNAME="${USERNAME}"
+        PUBLIC_KEY_CONTENT=$(echo "${PUBLIC_KEY}" | base64 -d)
 
-        # Escape double quotes and line content correctly
         aws ssm send-command \
-          --instance-ids "${{ env.INSTANCE_ID }}" \
+          --instance-ids "${INSTANCE_ID}" \
           --document-name "AWS-RunShellScript" \
           --comment "Create user and add SSH key" \
           --parameters commands="[
@@ -73,7 +80,7 @@ jobs:
             \"sudo touch /home/$USERNAME/.hushlogin\",
             \"sudo chown $USERNAME:$USERNAME /home/$USERNAME/.hushlogin\"
           ]" \
-          --region us-east-1 \
+          --region $AWS_REGION \
           --output text
 
     - name: Upload private key for download

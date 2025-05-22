@@ -49,13 +49,7 @@ jobs:
           --instance-ids "$INSTANCE_ID" \
           --document-name "AWS-RunShellScript" \
           --comment "Create user and set SSH key" \
-          --parameters commands='
-            sudo useradd -m ${{ github.event.inputs.username }};
-            sudo mkdir -p /home/${{ github.event.inputs.username }}/.ssh;
-            echo "${{ env.PUBLIC_KEY }}" | sudo tee /home/${{ github.event.inputs.username }}/.ssh/authorized_keys;
-            sudo chown -R ${{ github.event.inputs.username }}:${{ github.event.inputs.username }} /home/${{ github.event.inputs.username }}/.ssh;
-            sudo chmod 700 /home/${{ github.event.inputs.username }}/.ssh;
-            sudo chmod 600 /home/${{ github.event.inputs.username }}/.ssh/authorized_keys;
-          ' \
+          --parameters 'commands=["sudo useradd -m huzaifa", "sudo mkdir -p /home/huzaifa/.ssh", "echo \"ssh-rsa AAAA...\" | sudo tee /home/huzaifa/.ssh/authorized_keys", "sudo chown -R huzaifa:huzaifa /home/huzaifa/.ssh", "sudo chmod 700 /home/huzaifa/.ssh", "sudo chmod 600 /home/huzaifa/.ssh/authorized_keys"]' \
           --region us-east-1 \
           --output text
+

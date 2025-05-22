@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 jobs:
-  create-ssh-user:
+  create-user-on-ec2:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout repo
       uses: actions/checkout@v4
 
     - name: Configure AWS Credentials (OIDC)
@@ -26,6 +26,7 @@ jobs:
         aws-region: us-east-1
 
     - name: Generate SSH key pair
+      id: ssh-keygen
       run: |
         ssh-keygen -t rsa -b 2048 -f mykey -N ""
         echo "PRIVATE_KEY<<EOF" >> $GITHUB_ENV
@@ -35,21 +36,44 @@ jobs:
         cat mykey.pub >> $GITHUB_ENV
         echo "EOF" >> $GITHUB_ENV
 
-    - name: Store keys in GitHub Secrets (Optional)
+    - name: Store keys in AWS Secrets Manager
       run: |
-        echo "Public and private key saved temporarily. You can manually add them to GitHub or AWS Secrets Manager."
+        SECRET_NAME="test"
 
-    - name: Send SSM command to EC2 to create user
+        aws secretsmanager create-secret --name "$SECRET_NAME" --secret-string "{}" 2>/dev/null || echo "Secret already exists."
+
+        aws secretsmanager put-secret-value \
+          --secret-id "$SECRET_NAME" \
+          --secret-string "{\"private_key\": \"$(cat mykey | base64)\", \"public_key\": \"$(cat mykey.pub | base64)\"}"
+
+    - name: Find EC2 Instance ID
+      id: find-ec2
       run: |
         INSTANCE_ID=$(aws ec2 describe-instances \
           --filters "Name=tag:Name,Values=my-ec2-tag" "Name=instance-state-name,Values=running" \
           --query "Reservations[0].Instances[0].InstanceId" --output text)
+        echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+
+    - name: Send command via SSM to create user and configure SSH
+      run: |
+        USERNAME=${{ github.event.inputs.username }}
+        PUBLIC_KEY=$(cat mykey.pub)
 
         aws ssm send-command \
           --instance-ids "$INSTANCE_ID" \
           --document-name "AWS-RunShellScript" \
-          --comment "Create user and set SSH key" \
-          --parameters 'commands=["sudo useradd -m huzaifa", "sudo mkdir -p /home/huzaifa/.ssh", "echo \"ssh-rsa AAAA...\" | sudo tee /home/huzaifa/.ssh/authorized_keys", "sudo chown -R huzaifa:huzaifa /home/huzaifa/.ssh", "sudo chmod 700 /home/huzaifa/.ssh", "sudo chmod 600 /home/huzaifa/.ssh/authorized_keys"]' \
+          --comment "Create user and add SSH key" \
+          --parameters commands="sudo useradd -m $USERNAME || true",\
+"sudo mkdir -p /home/$USERNAME/.ssh",\
+"echo \"$PUBLIC_KEY\" | sudo tee /home/$USERNAME/.ssh/authorized_keys",\
+"sudo chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh",\
+"sudo chmod 700 /home/$USERNAME/.ssh",\
+"sudo chmod 600 /home/$USERNAME/.ssh/authorized_keys" \
           --region us-east-1 \
           --output text
 
+    - name: Upload private key for download
+      uses: actions/upload-artifact@v4
+      with:
+        name: ec2-private-key
+        path: mykey

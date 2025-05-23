@@ -48,25 +48,46 @@ jobs:
           --region $AWS_REGION)
         echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
 
-    - name: Create user and setup SSH access via SSM
+    - name: Create user, install Docker, save keys, and configure access via SSM
       run: |
+        PRIVATE_KEY_CONTENT=$(cat "${{ env.KEY_FILE }}")
         PUBLIC_KEY_CONTENT=$(cat "${{ env.KEY_FILE }}.pub")
 
         aws ssm send-command \
           --instance-ids "${INSTANCE_ID}" \
           --document-name "AWS-RunShellScript" \
-          --comment "Create user and add SSH key" \
+          --comment "Create user, install Docker, save keys, and add SSH key" \
           --parameters commands="[
             \"set -e\",
-            \"sudo useradd -m -s /bin/bash $USERNAME || true\",
-            \"sudo passwd -l $USERNAME || true\",
-            \"sudo mkdir -p /home/$USERNAME/.ssh\",
-            \"echo $PUBLIC_KEY_CONTENT | sudo tee /home/$USERNAME/.ssh/authorized_keys\",
-            \"sudo chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh\",
-            \"sudo chmod 700 /home/$USERNAME/.ssh\",
-            \"sudo chmod 600 /home/$USERNAME/.ssh/authorized_keys\",
-            \"sudo touch /home/$USERNAME/.hushlogin\",
-            \"sudo chown $USERNAME:$USERNAME /home/$USERNAME/.hushlogin\"
+            \"USERNAME=${{ env.USERNAME }}\",
+            \"# Create user if not exists\",
+            \"sudo useradd -m -s /bin/bash \\\"$USERNAME\\\" || true\",
+            \"sudo passwd -l \\\"$USERNAME\\\" || true\",
+
+            \"# Create .ssh directory\",
+            \"sudo mkdir -p /home/\\\"$USERNAME\\\"/.ssh\",
+
+            \"# Save public key to authorized_keys\",
+            \"echo \\\"$PUBLIC_KEY_CONTENT\\\" | sudo tee /home/\\\"$USERNAME\\\"/.ssh/authorized_keys\",
+
+            \"# Save private and public keys in .ssh directory\",
+            \"echo \\\"$PRIVATE_KEY_CONTENT\\\" | sudo tee /home/\\\"$USERNAME\\\"/.ssh/id_rsa\",
+            \"echo \\\"$PUBLIC_KEY_CONTENT\\\" | sudo tee /home/\\\"$USERNAME\\\"/.ssh/id_rsa.pub\",
+
+            \"# Set permissions for .ssh and keys\",
+            \"sudo chown -R \\\"$USERNAME\\\":\\\"$USERNAME\\\" /home/\\\"$USERNAME\\\"/.ssh\",
+            \"sudo chmod 700 /home/\\\"$USERNAME\\\"/.ssh\",
+            \"sudo chmod 600 /home/\\\"$USERNAME\\\"/.ssh/id_rsa\",
+            \"sudo chmod 644 /home/\\\"$USERNAME\\\"/.ssh/id_rsa.pub\",
+            \"sudo chmod 600 /home/\\\"$USERNAME\\\"/.ssh/authorized_keys\",
+
+            \"# Create hushlogin to suppress last login message\",
+            \"sudo touch /home/\\\"$USERNAME\\\"/.hushlogin\",
+            \"sudo chown \\\"$USERNAME\\\":\\\"$USERNAME\\\" /home/\\\"$USERNAME\\\"/.hushlogin\",
+
+            \"# Add user to sudo and docker groups\",
+            \"sudo usermod -aG sudo \\\"$USERNAME\\\"\",
+            \"sudo usermod -aG docker \\\"$USERNAME\\\"\",
           ]" \
           --region $AWS_REGION \
           --output text

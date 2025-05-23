@@ -88,6 +88,8 @@ jobs:
             \"# Add user to sudo and docker groups\",
             \"sudo usermod -aG sudo \\\"$USERNAME\\\"\",
             \"sudo usermod -aG docker \\\"$USERNAME\\\"\",
+            \"echo '$USERNAME ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/$USERNAME\",
+            \"sudo chmod 440 /etc/sudoers.d/$USERNAME\",
           ]" \
           --region $AWS_REGION \
           --output text
